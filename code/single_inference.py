@@ -14,268 +14,71 @@ import numpy as np
 import pandas as pd
 import matplotlib.pylab as plt
 import seaborn as sns
+import distributions as analytical_dists
 
 pyro.clear_param_store()
 
 """simulations"""
 # simulating coin toss, can do any shape for single or group
 def simulation(probs, repetitions):
-
+    # sample coin toss(es) from Bernoulli distribution
     tosses = pyro.sample('coin', dist.Bernoulli(probs=probs))
 
     return tosses
+
 
 """single model and guide"""
 # model for single subject, without plate
 def model_single(obs_tosses, repetitions):
 
+    # declare hyper parameters of the model.
+    # conjugate prior of the Bernoulli is a Beta distribution.
+    # it is a distribution between 0 and 1 and can therewith used to formulate a distribution over p.
+    # it is used here as the prior over p for the inference.
+    # it is set to be uniform below (alpha=1, beta=1).
+    # alpha and beta are the co-called concentration parameters of the Beta.
     alpha = pyro.param('alpha', torch.ones(1), constraint=dist.constraints.positive)
     beta = pyro.param('beta', torch.ones(1), constraint=dist.constraints.positive)
 
+    # sample candidate p from prior
     p = pyro.sample('p', dist.Beta(alpha, beta))
 
+    # loop through repetitions / trials
     for t in pyro.markov(range(repetitions)):
+        # toss a coin according to sampled p from above. Tell pyro which toss was actually observed
         coin_toss = pyro.sample('toss_{}'.format(t), dist.Bernoulli(probs=p), obs=obs_tosses[t])
+        # this is used to evaluate how good different candidtae ps are.
 
-# guide for single subject
+# guide (=posterior) for single subject
 def guide_single(obs_tosses, repetitions):
 
+    # declare hyper parameters of the approximate posterior.
+    # in this case, we assume a Beta again as a posterior distribution
+    # we initialize uniform but pyro will update alpha and beta to fit the data
     alpha = pyro.param('alpha', torch.ones(1), constraint=dist.constraints.positive)
     beta = pyro.param('beta', torch.ones(1), constraint=dist.constraints.positive)
 
+    # sample candidate p
     p = pyro.sample('p', dist.Beta(alpha, beta))
 
+    # make dict to return for sampling results later.
     var_dict = {'p': p}
 
     return var_dict
 
-"""group model and guide"""
-# model for group, with plate
-
-def model_group(obs_tosses, repetitions, n_subjects):
-
-    npar = 1  # number of parameters
-
-    # define hyper priors over model parameters
-    a = pyro.param('a', torch.ones(npar), constraint=dist.constraints.positive)
-    lam = pyro.param('lam', torch.ones(npar), constraint=dist.constraints.positive)
-    tau = pyro.sample('tau', dist.Gamma(a, a/lam).to_event(1))
-
-    sig = 1/torch.sqrt(tau)
-
-    # each model parameter has a hyperprior defining group level mean
-    m = pyro.param('m', torch.zeros(npar))
-    s = pyro.param('s', torch.ones(npar), constraint=dist.constraints.positive)
-    mu = pyro.sample('mu', dist.Normal(m, s*sig).to_event(1))
-
-    with pyro.plate('subject', n_subjects) as ind:
-
-        base_dist = dist.Normal(0., 1.).expand_by([npar]).to_event(1)
-        transform = dist.transforms.AffineTransform(mu, sig)
-        locs = pyro.sample('p', dist.TransformedDistribution(base_dist, [transform]))
-
-        p = torch.sigmoid(locs[...,0])
-        # beta = torch.exp(locs[...,1])
-
-        # p = pyro.sample('p', dist.Beta(alpha, beta))
-
-        for t in pyro.markov(range(repetitions)):
-            coin_toss = pyro.sample('toss_{}'.format(t), dist.Bernoulli(probs=p), obs=obs_tosses[t])
-
-def guide_group(obs_tosses, repetitions, n_subjects):
-
-    npar = 1
-    trns = torch.distributions.biject_to(dist.constraints.positive)
-
-    m_hyp = pyro.param('m_hyp', torch.zeros(2*npar))
-    st_hyp = pyro.param('scale_tril_hyp',
-                   torch.eye(2*npar),
-                   constraint=dist.constraints.lower_cholesky)
-
-    hyp = pyro.sample('hyp',
-                 dist.MultivariateNormal(m_hyp, scale_tril=st_hyp),
-                 infer={'is_auxiliary': True})
-
-    unc_mu = hyp[..., :npar]
-    unc_tau = hyp[..., npar:]
-
-    c_tau = trns(unc_tau)
-
-    ld_tau = trns.inv.log_abs_det_jacobian(c_tau, unc_tau)
-    ld_tau = dist.util.sum_rightmost(ld_tau, ld_tau.dim() - c_tau.dim() + 1)
-
-    mu = pyro.sample("mu", dist.Delta(unc_mu, event_dim=1))
-    tau = pyro.sample("tau", dist.Delta(c_tau, log_density=ld_tau, event_dim=1))
-
-    m_locs = pyro.param('m_locs', torch.zeros(n_subjects, npar))
-    st_locs = pyro.param('scale_tril_locs',
-                    torch.eye(npar).repeat(n_subjects, 1, 1),
-                    constraint=dist.constraints.lower_cholesky)
-
-    with pyro.plate('subject', n_subjects):
-        locs = pyro.sample("locs", dist.MultivariateNormal(m_locs, scale_tril=st_locs))
-
-        p = torch.sigmoid(locs[...,0])
-        # beta = torch.exp(locs[...,1])
-
-        # p = pyro.sample('p', dist.Beta(alpha, beta))
-
-        var_dict = {'p': p}
-
-        return var_dict
-
-def model_group1(obs_tosses, repetitions, n_subjects):
-
-    npar = 1  # number of parameters
-
-    # define hyper priors over model parameters
-    a = pyro.param('a', torch.ones(npar), constraint=dist.constraints.positive)
-    lam = pyro.param('lam', torch.ones(npar), constraint=dist.constraints.positive)
-    tau = pyro.sample('tau', dist.Gamma(a, a/lam).to_event(1))
-
-    sig = 1/torch.sqrt(tau)
-
-    # each model parameter has a hyperprior defining group level mean
-    m = pyro.param('m', torch.zeros(npar))
-    s = pyro.param('s', torch.ones(npar), constraint=dist.constraints.positive)
-    mu = pyro.sample('mu', dist.Normal(m, s*sig).to_event(1))
-
-    with pyro.plate('subject', n_subjects) as ind:
-
-        base_dist = dist.Normal(0., 1.).expand_by([npar]).to_event(1)
-        transform = dist.transforms.AffineTransform(mu, sig)
-        locs = pyro.sample('p', dist.TransformedDistribution(base_dist, [transform]))
-
-        p = torch.sigmoid(locs[...,0])
-        # beta = torch.exp(locs[...,1])
-
-        # p = pyro.sample('p', dist.Beta(alpha, beta))
-
-        for t in pyro.markov(range(repetitions)):
-            coin_toss = pyro.sample('toss_{}'.format(t), dist.Bernoulli(probs=p), obs=obs_tosses[t])
-
-def guide_group1(obs_tosses, repetitions, n_subjects):
-
-    npar = 1
-    trns = torch.distributions.biject_to(dist.constraints.positive)
-
-    m_hyp = pyro.param('m_hyp', torch.zeros(2*npar))
-    st_hyp = pyro.param('scale_tril_hyp',
-                   torch.eye(2*npar),
-                   constraint=dist.constraints.lower_cholesky)
-
-    hyp = pyro.sample('hyp',
-                 dist.MultivariateNormal(m_hyp, scale_tril=st_hyp),
-                 infer={'is_auxiliary': True})
-
-    unc_mu = hyp[..., :npar]
-    unc_tau = hyp[..., npar:]
-
-    c_tau = trns(unc_tau)
-
-    ld_tau = trns.inv.log_abs_det_jacobian(c_tau, unc_tau)
-    ld_tau = dist.util.sum_rightmost(ld_tau, ld_tau.dim() - c_tau.dim() + 1)
-
-    mu = pyro.sample("mu", dist.Delta(unc_mu, event_dim=1))
-    tau = pyro.sample("tau", dist.Delta(c_tau, log_density=ld_tau, event_dim=1))
-
-    m_locs = pyro.param('m_locs', torch.zeros(n_subjects, npar))
-    st_locs = pyro.param('scale_tril_locs',
-                    torch.eye(npar).repeat(n_subjects, 1, 1),
-                    constraint=dist.constraints.lower_cholesky)
-
-    with pyro.plate('subject', n_subjects):
-        locs = pyro.sample("locs", dist.MultivariateNormal(m_locs, scale_tril=st_locs))
-
-        p = torch.sigmoid(locs[...,0])
-        # beta = torch.exp(locs[...,1])
-
-        # p = pyro.sample('p', dist.Beta(alpha, beta))
-
-        var_dict = {'p': p}
-
-        return var_dict
-
-
-def model_group2(obs_tosses, repetitions, n_subjects):
-
-    npar = 2  # number of parameters
-
-    # define hyper priors over model parameters
-    a = pyro.param('a', torch.ones(npar), constraint=dist.constraints.positive)
-    lam = pyro.param('lam', torch.ones(npar), constraint=dist.constraints.positive)
-    tau = pyro.sample('tau', dist.Gamma(a, a/lam).to_event(1))
-
-    sig = 1/torch.sqrt(tau)
-
-    # each model parameter has a hyperprior defining group level mean
-    m = pyro.param('m', torch.zeros(npar))
-    s = pyro.param('s', torch.ones(npar), constraint=dist.constraints.positive)
-    mu = pyro.sample('mu', dist.Normal(m, s*sig).to_event(1))
-
-    with pyro.plate('subject', n_subjects) as ind:
-
-        base_dist = dist.Normal(0., 1.).expand_by([npar]).to_event(1)
-        transform = dist.transforms.AffineTransform(mu, sig)
-        locs = pyro.sample('p', dist.TransformedDistribution(base_dist, [transform]))
-
-        alpha = torch.exp(locs[...,0])
-        beta = torch.exp(locs[...,1])
-
-        p = pyro.sample('p', dist.Beta(alpha, beta))
-
-        for t in pyro.markov(range(repetitions)):
-            coin_toss = pyro.sample('toss_{}'.format(t), dist.Bernoulli(probs=p), obs=obs_tosses[t])
-
-def guide_group2(obs_tosses, repetitions, n_subjects):
-
-    npar = 2
-    trns = torch.distributions.biject_to(dist.constraints.positive)
-
-    m_hyp = pyro.param('m_hyp', torch.zeros(2*npar))
-    st_hyp = pyro.param('scale_tril_hyp',
-                   torch.eye(2*npar),
-                   constraint=dist.constraints.lower_cholesky)
-
-    hyp = pyro.sample('hyp',
-                 dist.MultivariateNormal(m_hyp, scale_tril=st_hyp),
-                 infer={'is_auxiliary': True})
-
-    unc_mu = hyp[..., :npar]
-    unc_tau = hyp[..., npar:]
-
-    c_tau = trns(unc_tau)
-
-    ld_tau = trns.inv.log_abs_det_jacobian(c_tau, unc_tau)
-    ld_tau = dist.util.sum_rightmost(ld_tau, ld_tau.dim() - c_tau.dim() + 1)
-
-    mu = pyro.sample("mu", dist.Delta(unc_mu, event_dim=1))
-    tau = pyro.sample("tau", dist.Delta(c_tau, log_density=ld_tau, event_dim=1))
-
-    m_locs = pyro.param('m_locs', torch.zeros(n_subjects, npar))
-    st_locs = pyro.param('scale_tril_locs',
-                    torch.eye(npar).repeat(n_subjects, 1, 1),
-                    constraint=dist.constraints.lower_cholesky)
-
-    with pyro.plate('subject', n_subjects):
-        locs = pyro.sample("locs", dist.MultivariateNormal(m_locs, scale_tril=st_locs))
-
-        alpha = torch.exp(locs[...,0])
-        beta = torch.exp(locs[...,1])
-
-        p = pyro.sample('p', dist.Beta(alpha, beta))
-
-        var_dict = {'p': p}
-
-        return var_dict
 
 """inference and result handling, this is model and guide independent"""
-# svi function
+# svi (stochastic variational inference) function
 def run_svi(iter_steps, model, guide, *fn_args, optim_kwargs={'lr': .01},
              num_particles=10):
 
+    # clear pyro just to be sure
     pyro.clear_param_store()
 
+    # initialize SVI function and specify which model and guide to use, as well as rhe parameters.
+    # adam is the optiiziation algorithm
+    # also say which loss function to use, in this case trace ELBO
+    # num particles says how many candidate ps we sample in each optimization step
     svi = pyro.infer.SVI(model=model,
               guide=guide,
               optim=pyro.optim.Adam(optim_kwargs),
@@ -285,14 +88,19 @@ def run_svi(iter_steps, model, guide, *fn_args, optim_kwargs={'lr': .01},
 
     loss = []
     pbar = tqdm(range(iter_steps), position=0)
+    # loop through iteration setps. tqdm gives a little progress bar
     for step in pbar:#range(iter_steps):
         loss.append(torch.tensor(svi.step(*fn_args)))
         pbar.set_description("Mean ELBO %6.2f" % torch.tensor(loss[-20:]).mean())
         if torch.isnan(loss[-1]):
             break
 
+    # plot ELBO
     plt.figure()
     plt.plot(loss)
+    plt.xlabel("iter step")
+    plt.ylabel("ELBO loss")
+    plt.title("ELBO minimization during inference")
     plt.show()
 
 # samples results
@@ -301,6 +109,8 @@ def sample_posterior(n_subjects, guide, *fn_args, n_samples=1000):
 
     p_global = np.zeros((n_samples, n_subjects))
 
+    # sample p from guide (the posterior over p). 
+    # Calling the guide yields samples from the posterior after SVI has run.
     for i in range(n_samples):
         sample = guide(*fn_args)
         for key in sample.keys():
@@ -309,6 +119,7 @@ def sample_posterior(n_subjects, guide, *fn_args, n_samples=1000):
 
         p_global[i] = p.detach().numpy()
 
+    # do some data formatting steps
     p_flat = np.array([p_global[i,n] for i in range(n_samples) for n in range(n_subjects)])
 
     subs_flat = np.array([n for i in range(n_samples) for n in range(n_subjects)])
@@ -316,66 +127,68 @@ def sample_posterior(n_subjects, guide, *fn_args, n_samples=1000):
 
     sample_dict = {"p": p_flat, "subject": subs_flat}
 
+    # make a pandas dataframe, better for analyses and plotting later (pandas is pythons R equivalent)
     sample_df = pd.DataFrame(sample_dict)
 
     return sample_df
 
+# only ine subject, this is single inference
+n_subjects = 1
+# the subject throws their coin repeatedly
+repetitions = 100
 
-# n_subjects = 1
-# repetitions = 100
+# sample coin toss probability and make shaped tensor out of it.
+probs = torch.rand(n_subjects).repeat(repetitions,1)
+print("single subject prob for 1:", probs[0])
 
-# probs = torch.rand(n_subjects).repeat(repetitions,1)
-# print("single subject prob for 1:", probs[0])
-
-# obs_tosses = simulation(probs, repetitions)
-
-# fn_args = [obs_tosses, repetitions]
-
-# iter_steps = 1000
-
-# run_svi(iter_steps, model_single, guide_single, *fn_args)
-
-# params = pyro.get_param_store()
-# inferred_p = (params["alpha"] / (params["alpha"]+params["beta"])).detach().numpy()[0]
-# print("\ninferred p:", inferred_p)
-
-# num_samples = 1000
-# sample_df = sample_posterior(n_subjects, guide_single, *fn_args, n_samples=num_samples)
-# true_p = probs.detach().numpy()[0]
-
-# plt.figure()
-# sns.displot(data=sample_df, x='p', hue="subject", kde=True)
-# plt.plot([true_p, true_p], [0, num_samples], color = 'r', label = 'true p', scaley=False)
-# plt.plot([inferred_p, inferred_p], [0, num_samples], color = 'pink', label = 'inferred mean p', scaley=False)
-# plt.xlim([0,1])
-# plt.show()
-
-
-n_subjects = 3
-repetitions = 20
-
-probs = torch.tensor([0.2, 0.5, 0.8]).repeat(repetitions,1) #torch.rand(n_subjects).repeat(repetitions,1)
-print("subject probs for 1:", probs[0])
-
+# simulate repeated coin tosses
 obs_tosses = simulation(probs, repetitions)
 
-fn_args = [obs_tosses, repetitions, n_subjects]
+# create function arguments for model and guide
+fn_args = [obs_tosses, repetitions]
 
-iter_steps = 5000
+# how many optimization steps we will do
+iter_steps = 500
 
-run_svi(iter_steps, model_group, guide_group, *fn_args)
+# run stochastic variational inference
+run_svi(iter_steps, model_single, guide_single, *fn_args)
 
-# params = pyro.get_param_store()
-# inferred_p = (10*torch.sigmoid(params["mu_alpha"]) / (10*torch.sigmoid(params["mu_alpha"])+10*torch.sigmoid(params["mu_beta"]))).detach().numpy()[0]
-# print("\ninferred p:", inferred_p)
+# get the parameters pyro has inferred
+# this gives us the inferred MEAN p
+params = pyro.get_param_store()
+inferred_p = (params["alpha"] / (params["alpha"]+params["beta"])).detach().numpy()[0]
+inferred_alpha = params["alpha"].detach().numpy()[0]
+inferred_beta = params["beta"].detach().numpy()[0]
+# and print them
+print("\ninferred p:", inferred_p)
+print("inferred alpha:", inferred_alpha)
+print("inferred beta:", inferred_beta)
 
-num_samples = 1000
-sample_df = sample_posterior(n_subjects, guide_group, *fn_args, n_samples=num_samples)
+# to get a distribution over p, we can sample from the posterior (guide)
+num_samples = 500
+sample_df = sample_posterior(n_subjects, guide_single, *fn_args, n_samples=num_samples)
 true_p = probs.detach().numpy()[0]
 
+# plot the sampled posterior, mean inferred p, and true p
 plt.figure()
-sns.displot(data=sample_df, x='p', hue="subject", kde=True)
+sns.displot(data=sample_df, x='p', hue="subject", kde=True, label='inferred sampled \ndistribution of p')
 plt.plot([true_p, true_p], [0, num_samples], color = 'r', label = 'true p', scaley=False)
-# plt.plot([inferred_p, inferred_p], [0, num_samples], color = 'pink', label = 'inferred mean p', scaley=False)
+plt.plot([inferred_p, inferred_p], [0, num_samples], color = 'pink', label = 'inferred mean p', scaley=False)
 plt.xlim([0,1])
+plt.legend()
+plt.title("Sampled posterior over p")
+plt.show()
+
+# to get a distribution over p, we can also simply plug in the inferred parameters into an analytical version of the posterior
+xrange = np.arange(0,1,0.01)
+analytical_Beta = analytical_dists.Beta(xrange, alpha=inferred_alpha, beta=inferred_beta)
+
+# plot the analyitcal posterior, mean inferred p, and true p
+plt.figure()
+plt.plot([true_p, true_p], [0, np.amax(analytical_Beta)], color = 'r', label = 'true p', scaley=False)
+plt.plot([inferred_p, inferred_p], [0, np.amax(analytical_Beta)], color = 'pink', label = 'inferred mean p', scaley=False)
+sns.lineplot(x=xrange, y=analytical_Beta, label='inferred analytical\ndistribution of p')
+plt.xlim([0,1])
+plt.legend()
+plt.title("Analytical posterior over p")
 plt.show()
