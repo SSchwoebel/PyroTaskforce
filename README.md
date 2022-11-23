@@ -1,4 +1,5 @@
-#Code and materials for pyro taskforce meetings
+Code and materials for pyro taskforce meetings
+==============================================
 
 The idea is, to jointly get into pyro, and distribute and parallelize documentation reading etc.
 
@@ -6,7 +7,7 @@ To get started with the code, use the environment.yml file to create a conda env
 
 First install anaconda, open a commandline of your choice, and create the environment with
 ```
-conda env create -f environment.yaml
+conda env create -f environment.yml
 ```
 and activate it using
 ```
