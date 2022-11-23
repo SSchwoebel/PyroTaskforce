@@ -47,6 +47,10 @@ contains the code that is shown in the introduction to pyro presentation
 single_inference.py
 ```
 contains a minimal working example of single subject inference that infers the probability underlying simulated coin tosses.
+```
+single_inference_complex.py
+```
+contains a more complex example of single subject inference that infers the probability underlying simulated coin tosses, now with two coins.
 
 ```
 group_inference.py
