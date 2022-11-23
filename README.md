@@ -1,6 +1,8 @@
 Code and materials for pyro taskforce meetings
 ==============================================
 
+The idea is, to jointly get into pyro, and distribute and parallelize documentation reading etc.
+
 Contents
 --------
 
@@ -19,7 +21,6 @@ is a presentation that introduces pytorch (the array and numerics library behind
 Getting started
 ---------------
 
-The idea is, to jointly get into pyro, and distribute and parallelize documentation reading etc.
 
 To get started with the code, use the environment.yml file to create a conda environment which installs all the necessary requirements to run inference with pyro, as well as plot results.
 
