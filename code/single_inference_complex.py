@@ -151,23 +151,31 @@ def sample_posterior(n_subjects, guide, *fn_args, n_samples=1000):
 now follows the part where things are actually called and ran
 """
 
+# one subject, has two coins
 n_subjects = 1
-repetitions = 20
+# tosses each repeatedly
+repetitions = 30
 
+# create true probs for coin 1 and coin 2
 probs1 = torch.rand(n_subjects).repeat(repetitions,1)
 probs2 = torch.rand(n_subjects).repeat(repetitions,1)
 print("single subject probs for subject 1:", probs1[0], probs2[0])
 
+# simulate coin tosses
 obs_tosses1, obs_tosses2 = simulation(probs1, probs2, repetitions)
 
+# create function arguments for model and guide
 fn_args = [obs_tosses1, obs_tosses2, repetitions]
 
+# inference steps
 iter_steps = 1000
 
+# run inference
 run_svi(iter_steps, model_single, guide_single, *fn_args)
 
 # get the parameters pyro has inferred
 # this gives us the inferred MEAN p
+# for p1
 params = pyro.get_param_store()
 inferred_p1 = (params["alpha1"] / (params["alpha1"]+params["beta1"])).detach().numpy()[0]
 inferred_alpha1 = params["alpha1"].detach().numpy()[0]
@@ -176,7 +184,7 @@ inferred_beta1 = params["beta1"].detach().numpy()[0]
 print("\ninferred p1:", inferred_p1)
 print("inferred alpha1:", inferred_alpha1)
 print("inferred beta1:", inferred_beta1)
-
+# for p2
 params = pyro.get_param_store()
 inferred_p2 = (params["alpha2"] / (params["alpha2"]+params["beta2"])).detach().numpy()[0]
 inferred_alpha2 = params["alpha2"].detach().numpy()[0]
@@ -186,9 +194,11 @@ print("\ninferred p2:", inferred_p2)
 print("inferred alpha2:", inferred_alpha2)
 print("inferred beta2:", inferred_beta2)
 
-
+# sample from posterior
 num_samples = 500
 sample_df = sample_posterior(n_subjects, guide_single, *fn_args, n_samples=num_samples)
+
+# get true probabilities
 true_p1 = probs1.detach().numpy()[0]
 true_p2 = probs2.detach().numpy()[0]
 
