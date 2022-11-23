@@ -44,6 +44,7 @@ def model_single(obs_tosses, repetitions):
     p = pyro.sample('p', dist.Beta(alpha, beta))
 
     # loop through repetitions / trials
+    # don't mind the pyro.markov, pyro wants this for longer loops.
     for t in pyro.markov(range(repetitions)):
         # toss a coin according to sampled p from above. Tell pyro which toss was actually observed
         coin_toss = pyro.sample('toss_{}'.format(t), dist.Bernoulli(probs=p), obs=obs_tosses[t])
@@ -131,6 +132,10 @@ def sample_posterior(n_subjects, guide, *fn_args, n_samples=1000):
     sample_df = pd.DataFrame(sample_dict)
 
     return sample_df
+
+"""
+now follows the part where things are actually called and ran
+"""
 
 # only ine subject, this is single inference
 n_subjects = 1
