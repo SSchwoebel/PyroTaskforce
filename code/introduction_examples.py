@@ -10,7 +10,7 @@ import torch
 import pyro
 
 from torch.distributions import constraints
-import analytical_dists
+import distributions as analytical_dists
 import numpy as np
 
 def model(toss):
